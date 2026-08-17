@@ -122,7 +122,7 @@ def write_report(run_root: Path, results):
         tr = "" if r["throttle_requests"] is None else f", throttle={r['throttle_requests']}"
         lines.append(
             f"[{status}] {r['test']}/{r['endpoint']} users={r['users']}, iters={r['iterations']}{tr} "
-            f"reqs={r['reqs']} fails={r['fails']}  log={r['logfile']}"
+            f"reqs={r['reqs']} fails={r['fails']}  log = {r['logfile']}"
         )
 
     lines.append("")
