@@ -1,0 +1,7 @@
+/target
+/loadtest_results
+*.env
+.vscode
+# JetBrains RustRover files
+.idea
+.run

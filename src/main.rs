@@ -4,7 +4,7 @@ use std::env;
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Number, Value};
 
 use goose::prelude::*;
 use goose::goose::GooseMethod;
@@ -35,9 +35,6 @@ async fn main() -> Result<(), GooseError> {
     println!("Starting tms_loadtest");
 
     GooseAttack::initialize()?
-        .register_scenario(scenario!("getclient")
-            .register_transaction(transaction!(get_tms_client))
-        )
         .register_scenario(scenario!("createkey")
             .register_transaction(transaction!(create_tms_key))
         )
@@ -66,73 +63,16 @@ const TMS_VERBOSE: &str = "TMS_VERBOSE";                  // default is false
 const TMS_PARSE_RESPONSE: &str = "TMS_PARSE_RESPONSE";    // default is false 
 const TMS_PUBKEY_FINGERPRINT: &str = "TMS_PUBKEY_FINGERPRINT";
 const TMS_PUBKEY_KEYTYPE: &str = "TMS_PUBKEY_KEYTYPE"; // default is ssh-ed25519
-const TMS_PUBKEY_USER: &str = "TMS_PUBKEY_USER";
 const TMS_PUBKEY_USERID: &str = "TMS_PUBKEY_USERID";
 const TMS_PUBKEY_HOST: &str = "TMS_PUBKEY_HOST";
+const TMS_IDENTITY: &str = "TMS_IDENTITY";
+const TMS_RP_ID: &str = "TMS_RP_ID";
+const TMS_RP_ACCOUNT: &str = "TMS_RP_ACCOUNT";
+const TMS_HOST_ACCOUNT: &str = "TMS_HOST_ACCOUNT";
 
 // ******************************************************************************
 //                           Transaction Functions
 // ******************************************************************************
-// ------------------------------------------------------------------------------
-// get_tms_client:
-// ------------------------------------------------------------------------------
-/// Get the default test client information.
-async fn get_tms_client(user: &mut GooseUser) -> TransactionResult {
-
-    // Get custom settings from the environment.
-    let env_vars = &RUNTIME_CTX.env_vars;
-    let verbose = env_vars.get(TMS_VERBOSE).unwrap();
-    let parse_response = env_vars.get(TMS_PARSE_RESPONSE).unwrap();
-
-    // TMS inputs.
-    let tenant = env_vars.get(X_TMS_TENANT)
-        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", X_TMS_TENANT));
-    let client_id = env_vars.get(X_TMS_CLIENT_ID)
-        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", X_TMS_CLIENT_ID));
-    let client_secret = env_vars.get(X_TMS_CLIENT_SECRET)
-        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", X_TMS_CLIENT_SECRET));
-
-    // Set the headers needed to issue the get_client call.
-    let mut headers = HeaderMap::new();
-    headers.insert("X-TMS-TENANT", tenant.parse().unwrap());
-    headers.insert("X-TMS-CLIENT-ID", client_id.parse().unwrap());
-    headers.insert("X-TMS-CLIENT-SECRET", client_secret.parse().unwrap());
-    headers.insert("Content-Type", "application/json".parse().unwrap());
-
-    // Use the user parameter to generate a reqwest RequestBuilder tailored to the
-    // method and targeting our server.
-    let reqbuilder = user.get_request_builder(&GooseMethod::Get, 
-                                                        "v1/tms/client/testclient1")?;
-    
-    // Incorporate the lower level reqwest builder into a GooseRequest.
-    let goose_request = GooseRequest::builder()
-        // Acquire the headers.
-        .set_request_builder(reqbuilder.headers(headers))
-        // Build the GooseRequest object.
-        .build();
-
-    // Use the user parameter to send the GooseRequest and capture response.
-    match user.request(goose_request).await?.response {
-        Ok(r) => {
-            if parse_response != "false" {
-                match r.text().await {
-                    Ok(content) => {
-                        if verbose != "false" {println!("*** Client: {}", content);}
-                    },
-                    Err(e) => {
-                        return TransactionResult::Err(Box::new(TransactionError::Reqwest(e)));
-                    }
-                };
-            }
-        },
-        Err(e) => {
-            return TransactionResult::Err(Box::new(TransactionError::Reqwest(e)));
-        }
-    };
-    //println!("{:#?}", goose_resp);
-
-    Ok(())
-}
 
 // ------------------------------------------------------------------------------
 // create_tms_key:
@@ -152,7 +92,7 @@ async fn create_tms_key(user: &mut GooseUser) -> TransactionResult {
     let client_secret = env_vars.get(X_TMS_CLIENT_SECRET)
         .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", X_TMS_CLIENT_SECRET));
 
-    // Set the headers needed to issue the get_client call.
+    // Set the headers needed to issue the call.
     let mut headers = HeaderMap::new();
     headers.insert("X-TMS-TENANT", tenant.parse().unwrap());
     headers.insert("X-TMS-CLIENT-ID", client_id.parse().unwrap());
@@ -161,18 +101,34 @@ async fn create_tms_key(user: &mut GooseUser) -> TransactionResult {
     headers.insert("Accept", "application/json".parse().unwrap());
     // headers.insert("Connection", "keep-alive".parse().unwrap());
 
+    // TMS inputs.
+    let tms_identity = env_vars.get(TMS_IDENTITY)
+        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_IDENTITY));
+    let rp_id = env_vars.get(TMS_RP_ID)
+        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_RP_ID));
+    let rp_account = env_vars.get(TMS_RP_ACCOUNT)
+        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_RP_ACCOUNT));
+    let host = env_vars.get(TMS_PUBKEY_HOST)
+        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_HOST));
+    let host_account = env_vars.get(TMS_HOST_ACCOUNT)
+        .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_HOST_ACCOUNT));
+
+    let minus_one = Number::from(-1i64);
     // Assemble the body of the post request.
     // TODO vary the client, host and host_account values based on user number
-    let json = json!({
-        "client_user_id": "testuser1", 
-        "host": "testhost1", 
-        "host_account": "testhostaccount1",
-        "num_uses": -1, 
-        "ttl_minutes": -1, 
-        "key_type": ""
-    });
-    let body = Body::from(json.to_string());
+    // TODO Get these values from the environment
+    let mut map = Map::new();
+    map.insert("tms_identity".to_string(), Value::String(tms_identity.to_string()));
+    map.insert("rp_id".to_string(), Value::String(rp_id.to_string()));
+    map.insert("rp_account".to_string(), Value::String(rp_account.to_string()));
+    map.insert("host".to_string(), Value::String(host.to_string()));
+    map.insert("host_account".to_string(), Value::String(host_account.to_string()));
+    map.insert("num_uses".to_string(), Value::Number(minus_one.clone()));
+    map.insert("ttl_minutes".to_string(), Value::Number(minus_one));
 
+    let json_obj = Value::Object(map);
+    if verbose != "false" {println!("*** Json request body: {}", json_obj);}
+    let body = Body::from(json_obj.to_string());
     // Use the user parameter to generate a reqwest RequestBuilder tailored to the
     // method and targeting our server.
     let reqbuilder = user.get_request_builder(&GooseMethod::Post, 
@@ -258,8 +214,8 @@ async fn get_tms_key(user: &mut GooseUser) -> TransactionResult {
         .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_FINGERPRINT));
     let pubkey_host = env_vars.get(TMS_PUBKEY_HOST)
     .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_HOST));
-    let pubkey_user = env_vars.get(TMS_PUBKEY_USER)
-    .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_USER));
+    let pubkey_host_account = env_vars.get(TMS_HOST_ACCOUNT)
+    .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_HOST_ACCOUNT));
     let pubkey_userid = env_vars.get(TMS_PUBKEY_USERID)
     .unwrap_or_else(|| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_USERID));
     let pubkey_keytype = env_vars.get(TMS_PUBKEY_KEYTYPE)
@@ -272,7 +228,8 @@ async fn get_tms_key(user: &mut GooseUser) -> TransactionResult {
 
     // Assemble the body of the post request.
     let mut map = Map::new();
-    map.insert("user".to_string(), Value::String(pubkey_user.to_string()));
+    // TODO/TBD Change user to host_account?
+    map.insert("user".to_string(), Value::String(pubkey_host_account.to_string()));
     map.insert("user_uid".to_string(), Value::String(pubkey_userid.to_string()));
     map.insert("keytype".to_string(), Value::String(pubkey_keytype.to_string()));
     map.insert("host".to_string(), Value::String(pubkey_host.to_string()));
@@ -335,62 +292,67 @@ fn get_env_vars() -> HashMap<&'static str, String> {
     let mut env_map = HashMap::new();
 
     // ----- X_TMS_TENANT
-    let val = env::var(X_TMS_TENANT).unwrap_or_else(
-                                |_| {"".to_string()});
+    let val = env::var(X_TMS_TENANT).unwrap_or_else(|_| {"".to_string()});
     if !val.is_empty() {env_map.insert(X_TMS_TENANT, val);}
 
     // ----- X_TMS_CLIENT_ID
-    let val = env::var(X_TMS_CLIENT_ID).unwrap_or_else(
-                                |_| {"".to_string()});
+    let val = env::var(X_TMS_CLIENT_ID).unwrap_or_else(|_| {"".to_string()});
     if !val.is_empty() {env_map.insert(X_TMS_CLIENT_ID, val);}
 
     // ----- X_TMS_CLIENT_SECRET
-    let val = env::var(X_TMS_CLIENT_SECRET).unwrap_or_else(
-                                |_| {"".to_string()});
+    let val = env::var(X_TMS_CLIENT_SECRET).unwrap_or_else(|_| {"".to_string()});
     if !val.is_empty() {env_map.insert(X_TMS_CLIENT_SECRET, val);}
 
     // ----- X_TMS_ADMIN_ID
-    let val = env::var(X_TMS_ADMIN_ID).unwrap_or_else(
-                                |_| {"".to_string()});
+    let val = env::var(X_TMS_ADMIN_ID).unwrap_or_else(|_| {"".to_string()});
     if !val.is_empty() {env_map.insert(X_TMS_ADMIN_ID, val);}
 
     // ----- X_TMS_ADMIN_SECRET
-    let val = env::var(X_TMS_ADMIN_SECRET).unwrap_or_else(
-                                |_| {"".to_string()});
+    let val = env::var(X_TMS_ADMIN_SECRET).unwrap_or_else(|_| {"".to_string()});
     if !val.is_empty() {env_map.insert(X_TMS_ADMIN_SECRET, val);}
 
     // ----- TMS_VERBOSE
-    // Set to the default "false" if not found; anything other than  
-    // "false" will trigger printing.  This only takes effect if 
-    // TMS_PARSE_RESPONSE = true.
-    let val = env::var(TMS_VERBOSE).unwrap_or_else(
-                                |_| {"false".to_string()});
+    // Set to the default "false" if not found; anything other than "false" will trigger printing.
+    //  This only takes effect if TMS_PARSE_RESPONSE = true.
+    let val = env::var(TMS_VERBOSE).unwrap_or_else(|_| {"false".to_string()});
     env_map.insert(TMS_VERBOSE, val);
 
     // ----- TMS_PARSE_RESPONSE
     // Set to the default "false" if not found; anything other than  
     // "false" will trigger the response to be parsed on receipt.
-    let val = env::var(TMS_PARSE_RESPONSE).unwrap_or_else(
-                                |_| {"false".to_string()});
+    let val = env::var(TMS_PARSE_RESPONSE).unwrap_or_else(|_| {"false".to_string()});
     env_map.insert(TMS_PARSE_RESPONSE, val);
 
-    // ----- TMS getkey settings
-    let val = env::var(TMS_PUBKEY_USER).unwrap_or_else(
-        |_| {"".to_string()});
-    if !val.is_empty() {env_map.insert(TMS_PUBKEY_USER, val);}
-    let val = env::var(TMS_PUBKEY_USERID).unwrap_or_else(
-        |_| {"".to_string()});
-    if !val.is_empty() {env_map.insert(TMS_PUBKEY_USERID, val);}
-    let val = env::var(TMS_PUBKEY_HOST).unwrap_or_else(
-        |_| {"".to_string()});
-    if !val.is_empty() {env_map.insert(TMS_PUBKEY_HOST, val);}
-    let val = env::var(TMS_PUBKEY_KEYTYPE).unwrap_or_else(
-        |_| {"ssh-ed25519".to_string()});
-    if !val.is_empty() {env_map.insert(TMS_PUBKEY_KEYTYPE, val);}
-    let val = env::var(TMS_PUBKEY_FINGERPRINT).unwrap_or_else(
-        |_| {"".to_string()});
-    if !val.is_empty() {env_map.insert(TMS_PUBKEY_FINGERPRINT, val);}
+    // TMS inputs.
 
+    let val = env::var(TMS_IDENTITY).unwrap_or_else(|_| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_IDENTITY));
+    env_map.insert(TMS_IDENTITY, val);
+
+    let val = env::var(TMS_RP_ID).unwrap_or_else(|_| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_RP_ID));
+    env_map.insert(TMS_RP_ID, val);
+
+    let val = env::var(TMS_RP_ACCOUNT).unwrap_or_else(|_| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_RP_ACCOUNT));
+    env_map.insert(TMS_RP_ACCOUNT, val);
+
+    let val = env::var(TMS_HOST_ACCOUNT).unwrap_or_else(|_| {"".to_string()});
+    env_map.insert(TMS_HOST_ACCOUNT, val);
+
+    // TODO/TBD ----- TMS getkey settings
+    let val = env::var(TMS_PUBKEY_USERID).unwrap_or_else(|_| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_USERID));
+    env_map.insert(TMS_PUBKEY_USERID, val);
+
+    let val = env::var(TMS_PUBKEY_HOST).unwrap_or_else(|_| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_HOST));
+    if !val.is_empty() {env_map.insert(TMS_PUBKEY_HOST, val);}
+
+    let val = env::var(TMS_HOST_ACCOUNT).unwrap_or_else(|_| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_HOST_ACCOUNT));
+    if !val.is_empty() {env_map.insert(TMS_HOST_ACCOUNT, val);}
+
+    let val = env::var(TMS_PUBKEY_FINGERPRINT).unwrap_or_else(|_| panic!("* FATAL ERROR: Required environment variable '{}' is not set.", TMS_PUBKEY_FINGERPRINT));
+    env_map.insert(TMS_PUBKEY_FINGERPRINT, val);
+
+    // NOTE: Only KEYTYPE is optional
+    let val = env::var(TMS_PUBKEY_KEYTYPE).unwrap_or_else(|_| {"ssh-ed25519".to_string()});
+    if !val.is_empty() {env_map.insert(TMS_PUBKEY_KEYTYPE, val);}
 
     // Always output the environment settings.
     // NOTE: Secrets are printed out!

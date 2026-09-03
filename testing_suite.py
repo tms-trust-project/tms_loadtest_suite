@@ -148,8 +148,8 @@ def main():
     selected_endpoints = []
     if ask_yn("Run getversion?"):
         selected_endpoints.append("getversion")
-    if ask_yn("Run getclient?"):
-        selected_endpoints.append("getclient")
+    # if ask_yn("Run getclient?"):
+    #     selected_endpoints.append("getclient")
     if ask_yn("Run getkey?"):
         selected_endpoints.append("getkey")
     if ask_yn("Run createkey?"):
